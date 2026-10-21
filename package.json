@@ -5,7 +5,12 @@
   "main": "mcp-server.js",
   "scripts": {
     "start": "node mcp-server.js",
+    "start:live": "node --env-file=.env mcp-server.js",
     "test": "node test-mcp.js"
+  },
+  "optionalDependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0"
   },
   "license": "MIT"
 }

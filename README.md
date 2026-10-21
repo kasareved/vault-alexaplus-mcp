@@ -13,11 +13,23 @@ npm start        # http://localhost:3000 (console) and POST /mcp (JSON-RPC 2.0)
 npm test         # protocol and tool tests
 ```
 
-No dependencies. Needs Node 18 or newer.
+Runs with no installs on Node 18 or newer (use Node 20.6+ for `npm run start:live`). The AWS SDK is only needed if you turn on the optional live integrations below.
 
 ## What is real and what is mocked
 
-All financial and store data is a mock in-memory vault, and the discount negotiation is simulated. Nothing talks to Amazon, AWS or a bank yet. To go live, replace the data in `mcp-server.js` with calls to your own services, then register the `/mcp` endpoint following Amazon's Alexa+ add-on documentation.
+By default all financial and store data is a mock in-memory vault, the discount negotiation is simulated, and nothing talks to Amazon, AWS, Google or a bank. Three integrations are built in but **off until you add your own keys**. Check `GET /health` to see which ones are switched on.
+
+## Optional live integrations
+
+Copy `.env.example` to `.env`, fill in what you want, then run `npm install` and `npm run start:live`. Never commit `.env`.
+
+| Integration                   | Enable with                                        | Used by                         | If off or failing       |
+| ----------------------------- | -------------------------------------------------- | ------------------------------- | ----------------------- |
+| Amazon Bedrock (Converse API) | `USE_BEDROCK=1`, AWS keys, `BEDROCK_MODEL_ID`      | `ask_vault_advisor`             | Rule-based answer       |
+| Amazon DynamoDB               | `DYNAMODB_TABLE` (keys `pk` and `sk`, both String) | `log_transaction`               | Kept in memory          |
+| Google Gemini                 | `GEMINI_API_KEY`                                   | `analyze_product_image_listing` | Simulated draft listing |
+
+The responses say which source answered (`amazon-bedrock`, `google-gemini`, `dynamodb`, `rule-based`, `simulated`, or `memory`).
 
 ## Connecting to Alexa+
 
@@ -27,20 +39,22 @@ This server speaks MCP over Streamable HTTP (JSON responses on `POST /mcp`, prot
 2. Add the OAuth pieces Alexa+ expects (401 challenge and metadata documents). These are not implemented in this demo.
 3. Onboard with the Alexa AI CLI by following the Alexa+ MCP QuickStart on developer.amazon.com.
 
-## Tools (10)
+## Tools (12)
 
-| Tool                         | Side   | What it does                                         |
-| ---------------------------- | ------ | ---------------------------------------------------- |
-| `get_financial_summary`      | Buyer  | Balance, budgets, bills                              |
-| `validate_purchase_safety`   | Buyer  | approved, caution or blocked, with reasons           |
-| `calculate_opportunity_cost` | Buyer  | Savings-goal delay and a 24-hour cooldown suggestion |
-| `predict_monthly_runway`     | Buyer  | End-of-month balance and risk level                  |
-| `negotiate_dynamic_discount` | Buyer  | Simulated voucher                                    |
-| `track_price_drop_target`    | Buyer  | Watchlist entry                                      |
-| `log_transaction`            | Buyer  | Updates balance and budget                           |
-| `split_shared_expense`       | Buyer  | Equal split with pending requests                    |
-| `predict_inventory_stockout` | Seller | Days left and draft purchase order                   |
-| `generate_morning_briefing`  | Both   | Role-aware daily briefing                            |
+| Tool                            | Side   | What it does                                                               |
+| ------------------------------- | ------ | -------------------------------------------------------------------------- |
+| `get_financial_summary`         | Buyer  | Balance, budgets, bills                                                    |
+| `validate_purchase_safety`      | Buyer  | approved, caution or blocked, with reasons                                 |
+| `calculate_opportunity_cost`    | Buyer  | Savings-goal delay and a 24-hour cooldown suggestion                       |
+| `predict_monthly_runway`        | Buyer  | End-of-month balance and risk level                                        |
+| `negotiate_dynamic_discount`    | Buyer  | Simulated voucher                                                          |
+| `track_price_drop_target`       | Buyer  | Watchlist entry                                                            |
+| `log_transaction`               | Buyer  | Updates balance and budget                                                 |
+| `split_shared_expense`          | Buyer  | Equal split with pending requests                                          |
+| `predict_inventory_stockout`    | Seller | Days left and draft purchase order                                         |
+| `generate_morning_briefing`     | Both   | Role-aware daily briefing                                                  |
+| `ask_vault_advisor`             | Buyer  | Plain-language advice, Bedrock when enabled                                |
+| `analyze_product_image_listing` | Seller | Draft listing from a photo (Gemini) or product name, needs seller approval |
 
 Plus 2 resources (`vault://financial/overview`, `vault://household/summary`) and 1 prompt (`financial_health_audit`).
 
@@ -52,6 +66,6 @@ curl -s localhost:3000/mcp -H "Content-Type: application/json" -d '{"jsonrpc":"2
 
 ## Credits
 
-Author: VEDANT KASARE. Built for the Amazon Developer Hackathon 2026.
+Author: VEDANT KASARE . Built for the Amazon Developer Hackathon 2026.
 
 License: MIT

@@ -58,11 +58,13 @@ const SCENARIOS = {
     ["Get me a better price on the Echo Show at $99.99.", "negotiate_dynamic_discount", {itemName:"Echo Show", currentPrice:99.99}],
     ["Split $90 of groceries with the house.", "split_shared_expense", {title:"Groceries", totalAmount:90}],
     ["Tell me if the Kindle drops under $80.", "track_price_drop_target", {itemName:"Kindle", targetPrice:80}],
-    ["Good morning, what's my day look like?", "generate_morning_briefing", {role:"buyer"}]
+    ["Good morning, what's my day look like?", "generate_morning_briefing", {role:"buyer"}],
+    ["Should I buy a $300 TV this month?", "ask_vault_advisor", {question:"Should I buy a $300 TV this month?"}]
   ],
   seller: [
     ["When will I run out of Echo Dot stands?", "predict_inventory_stockout", {asin:"B0ECHO001"}],
-    ["Good morning, how is the store doing?", "generate_morning_briefing", {role:"seller"}]
+    ["Good morning, how is the store doing?", "generate_morning_briefing", {role:"seller"}],
+    ["Write a listing for a bamboo laptop stand.", "analyze_product_image_listing", {hintProductName:"Bamboo laptop stand"}]
   ]
 };
 let role = "buyer", id = 0;

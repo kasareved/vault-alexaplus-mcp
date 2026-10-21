@@ -5,6 +5,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const integrations = require('./integrations');
 
 const round = n => Math.round(n * 100) / 100;
 const DAY = 86400000;
@@ -107,13 +108,15 @@ tool('track_price_drop_target', 'Add an item to the price-drop watchlist.',
   });
 
 tool('log_transaction', 'Record a spend and update the category budget.',
-  { title: S, amount: N, category: S }, ['title', 'amount', 'category'], a => {
+  { title: S, amount: N, category: S }, ['title', 'amount', 'category'], async a => {
     const b = vault.budgets[a.category];
     if (!b) throw new Error(`Unknown category "${a.category}".`);
     b.spent = round(b.spent + a.amount);
     vault.balance = round(vault.balance - a.amount);
-    vault.transactions.push({ ...a, at: new Date().toISOString() });
-    return { logged: a.title, newBalance: vault.balance, categoryRemaining: round(b.limit - b.spent) };
+    const tx = { ...a, at: new Date().toISOString() };
+    vault.transactions.push(tx);
+    const storage = await integrations.saveTransaction(tx);
+    return { logged: a.title, newBalance: vault.balance, categoryRemaining: round(b.limit - b.spent), storage };
   });
 
 tool('split_shared_expense', 'Split a household expense equally and queue requests.',
@@ -147,6 +150,44 @@ tool('generate_morning_briefing', 'Daily briefing for a buyer or a seller.',
       watchlist: vault.watchlist, tip: 'Ask me before any purchase over $100.' };
   });
 
+
+tool('ask_vault_advisor', 'Plain-language money advice from the vault data. Uses Amazon Bedrock when enabled, otherwise a rule-based answer.',
+  { question: S }, ['question'], async a => {
+    const safe = round(vault.balance - dueSoon(14));
+    const fallback = `You have $${vault.balance} in cash and $${dueSoon(14)} in bills due within 14 days, so about $${safe} is safe to spend. ` +
+      `Your "${vault.goal.name}" goal is $${round(vault.goal.target - vault.goal.saved)} away.`;
+    if (!integrations.cfg().useBedrock) return { source: 'rule-based', answer: fallback };
+    try {
+      const context = JSON.stringify({ balance: vault.balance, budgets: vault.budgets, bills: vault.bills, goal: vault.goal });
+      const answer = await integrations.askBedrock(
+        'You are a careful budgeting assistant inside Alexa+. Use only this data and answer in at most 3 short sentences. ' +
+        `Data: ${context}\nQuestion: ${a.question}`);
+      return { source: 'amazon-bedrock', answer };
+    } catch (e) {
+      return { source: 'rule-based', answer: fallback, note: `Bedrock unavailable: ${e.message}` };
+    }
+  });
+
+tool('analyze_product_image_listing', 'Seller: draft an Amazon listing from a product photo (Google Gemini) or a product name. Needs seller approval before publishing.',
+  { imageBase64: S, mimeType: S, hintProductName: S }, [], async a => {
+    if (!a.imageBase64 && !a.hintProductName) throw new Error('Provide imageBase64 (a photo) or hintProductName.');
+    if (a.imageBase64 && integrations.cfg().geminiKey) {
+      try {
+        const listing = await integrations.geminiListing({ imageBase64: a.imageBase64, mimeType: a.mimeType, hint: a.hintProductName });
+        return { source: 'google-gemini', listing, needsSellerApproval: true };
+      } catch (e) {
+        return { source: 'simulated', note: `Gemini unavailable: ${e.message}`, listing: draftFromName(a.hintProductName), needsSellerApproval: true };
+      }
+    }
+    return { source: 'simulated', listing: draftFromName(a.hintProductName), needsSellerApproval: true };
+  });
+
+function draftFromName(name) {
+  const n = name || 'Product';
+  return { title: `${n} - Durable, Easy to Use`, bullets: ['Built to last', 'Simple setup', 'Great value'],
+    description: `${n}. Replace this placeholder text with details from your product.`, category: 'General' };
+}
+
 // ---------- resources & prompts ----------
 const resources = [
   { uri: 'vault://financial/overview', name: 'Financial overview', mimeType: 'application/json', read: () => ({ balance: vault.balance, budgets: vault.budgets, bills: vault.bills }) },
@@ -158,7 +199,7 @@ const prompts = {
 };
 
 // ---------- JSON-RPC ----------
-function handle(msg) {
+async function handle(msg) {
   const id = msg && msg.id;
   const ok = result => ({ jsonrpc: '2.0', id, result });
   const err = (code, message) => ({ jsonrpc: '2.0', id: id === undefined ? null : id, error: { code, message } });
@@ -182,7 +223,8 @@ function handle(msg) {
           if ((type === 'number' && typeof v !== 'number') || (type === 'string' && typeof v !== 'string') || (type === 'array' && !Array.isArray(v)))
             throw new Error(`Argument "${k}" must be a ${type}`);
         }
-        return ok({ content: [{ type: 'text', text: JSON.stringify(t.fn(args), null, 2) }] });
+        const result = await t.fn(args);
+        return ok({ content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
       } catch (e) {
         return ok({ content: [{ type: 'text', text: e.message }], isError: true });
       }
@@ -212,17 +254,17 @@ function start(port = process.env.PORT || 3000) {
       res.end(typeof body === 'string' ? body : JSON.stringify(body));
     };
     if (req.method === 'OPTIONS') return send(204, '');
-    if (req.method === 'GET' && req.url === '/health') return send(200, { status: 'ok', tools: Object.keys(tools).length });
+    if (req.method === 'GET' && req.url === '/health') return send(200, { status: 'ok', tools: Object.keys(tools).length, integrations: integrations.status() });
     if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html'))
       return send(200, fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'), 'text/html; charset=utf-8');
     if (req.method === 'GET' && req.url === '/mcp') return send(405, { error: 'Use POST for MCP requests (Streamable HTTP, JSON responses).' });
     if (req.method === 'POST' && req.url === '/mcp') {
       let body = '';
-      req.on('data', c => { body += c; if (body.length > 1e6) req.destroy(); });
-      req.on('end', () => {
+      req.on('data', c => { body += c; if (body.length > 8e6) req.destroy(); });
+      req.on('end', async () => {
         let msg;
         try { msg = JSON.parse(body); } catch { return send(200, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
-        const out = Array.isArray(msg) ? msg.map(handle).filter(Boolean) : handle(msg);
+        const out = Array.isArray(msg) ? (await Promise.all(msg.map(handle))).filter(Boolean) : await handle(msg);
         if (out === null || (Array.isArray(out) && !out.length)) return send(202, '');
         send(200, out);
       });

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VaultAlexa+ console</title>
+<style>
+  :root{--paper:#EAF0F2;--card:#fff;--ink:#10222B;--muted:#5A6D76;--teal:#0E4F5C;--line:#C9D6DB;
+        --ok:#1E7A4C;--warn:#B77900;--bad:#B3322B;color-scheme:light}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+  header{padding:28px clamp(16px,5vw,56px) 8px}
+  h1{margin:0;font:700 clamp(28px,5vw,44px)/1.1 "Iowan Old Style","Palatino Linotype",Georgia,serif;color:var(--teal)}
+  header p{margin:6px 0 0;color:var(--muted);max-width:60ch}
+  main{display:grid;grid-template-columns:minmax(260px,380px) 1fr;gap:20px;padding:16px clamp(16px,5vw,56px) 48px}
+  @media(max-width:760px){main{grid-template-columns:1fr}}
+  h2{font:600 18px/1.3 "Iowan Old Style",Georgia,serif;margin:0 0 10px}
+  .tabs{display:flex;gap:8px;margin-bottom:12px}
+  .tabs button{flex:1;padding:8px;border:1px solid var(--line);background:var(--card);border-radius:8px;font:inherit;cursor:pointer}
+  .tabs button[aria-pressed=true]{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .say{display:block;width:100%;text-align:left;margin:0 0 8px;padding:10px 12px;border:1px solid var(--line);background:var(--card);
+       border-radius:8px;font:inherit;color:var(--ink);cursor:pointer}
+  .say:hover{border-color:var(--teal)}
+  button:focus-visible{outline:3px solid #6FB7C6;outline-offset:2px}
+  .out{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;min-height:260px}
+  .heard{margin:0 0 14px;color:var(--muted);font-style:italic}
+  .badge{display:inline-block;padding:3px 12px;border-radius:99px;color:#fff;font-weight:600;margin:0 0 10px}
+  .approved,.healthy,.ok{background:var(--ok)}.caution,.tight{background:var(--warn)}.blocked,.deficit,.reorder-now{background:var(--bad)}
+  .reasons{margin:0 0 14px;padding-left:20px}
+  pre{margin:0;padding:14px;background:#10222B;color:#D7ECF1;border-radius:8px;overflow:auto;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace}
+  .empty{color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>VaultAlexa+</h1>
+  <p>Say what you would ask Alexa+. This console sends the matching call to the MCP server and shows what comes back.</p>
+</header>
+<main>
+  <section aria-label="Things to ask">
+    <div class="tabs" role="group" aria-label="Role">
+      <button id="tb" aria-pressed="true">Buyer</button>
+      <button id="ts" aria-pressed="false">Seller</button>
+    </div>
+    <div id="list"></div>
+  </section>
+  <section class="out" aria-live="polite" id="out">
+    <p class="empty">Pick something to ask on the left.</p>
+  </section>
+</main>
+<script>
+const SCENARIOS = {
+  buyer: [
+    ["Can I buy Bose headphones for $219 from my electronics budget?", "validate_purchase_safety", {itemName:"Bose headphones", itemPrice:219, category:"electronics"}],
+    ["Can I buy a $1,200 laptop?", "validate_purchase_safety", {itemName:"Laptop", itemPrice:1200, category:"electronics"}],
+    ["How far back does a $300 TV set my savings?", "calculate_opportunity_cost", {itemName:"TV", itemPrice:300}],
+    ["Will I run short this month if I spend $600 more?", "predict_monthly_runway", {projectedSpend:600}],
+    ["Get me a better price on the Echo Show at $99.99.", "negotiate_dynamic_discount", {itemName:"Echo Show", currentPrice:99.99}],
+    ["Split $90 of groceries with the house.", "split_shared_expense", {title:"Groceries", totalAmount:90}],
+    ["Tell me if the Kindle drops under $80.", "track_price_drop_target", {itemName:"Kindle", targetPrice:80}],
+    ["Good morning, what's my day look like?", "generate_morning_briefing", {role:"buyer"}]
+  ],
+  seller: [
+    ["When will I run out of Echo Dot stands?", "predict_inventory_stockout", {asin:"B0ECHO001"}],
+    ["Good morning, how is the store doing?", "generate_morning_briefing", {role:"seller"}]
+  ]
+};
+let role = "buyer", id = 0;
+const $ = s => document.querySelector(s);
+function renderList(){
+  const list = $("#list"); list.replaceChildren();
+  SCENARIOS[role].forEach(([say, name, args]) => {
+    const b = document.createElement("button"); b.className = "say"; b.textContent = "\u201C" + say + "\u201D";
+    b.onclick = () => run(say, name, args); list.appendChild(b);
+  });
+  $("#tb").setAttribute("aria-pressed", role === "buyer"); $("#ts").setAttribute("aria-pressed", role === "seller");
+}
+$("#tb").onclick = () => { role = "buyer"; renderList(); };
+$("#ts").onclick = () => { role = "seller"; renderList(); };
+async function run(say, name, args){
+  const body = {jsonrpc:"2.0", id:++id, method:"tools/call", params:{name, arguments:args}};
+  const out = $("#out"); out.replaceChildren();
+  try {
+    const res = await fetch("/mcp", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const json = await res.json();
+    const text = json.result.content[0].text;
+    const heard = document.createElement("p"); heard.className = "heard"; heard.textContent = "Alexa+ heard: " + say; out.appendChild(heard);
+    let data = null; try { data = JSON.parse(text); } catch {}
+    const tag = data && (data.verdict || data.risk || data.status);
+    if (tag) { const bd = document.createElement("span"); bd.className = "badge " + tag; bd.textContent = tag; out.appendChild(bd); }
+    if (data && data.reasons) { const ul = document.createElement("ul"); ul.className = "reasons";
+      data.reasons.forEach(r => { const li = document.createElement("li"); li.textContent = r; ul.appendChild(li); }); out.appendChild(ul); }
+    const pre = document.createElement("pre"); pre.textContent = text; out.appendChild(pre);
+  } catch (e) {
+    const p = document.createElement("p"); p.textContent = "Could not reach the server. Run npm start and open http://localhost:3000."; out.appendChild(p);
+  }
+}
+renderList();
+</script>
+</body>
+</html>

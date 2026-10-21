@@ -1,0 +1,11 @@
+{
+  "name": "vaultalexa-plus",
+  "version": "1.0.0",
+  "description": "Alexa+ MCP server: a budget-aware shopping guard for buyers and an inventory co-pilot for sellers.",
+  "main": "mcp-server.js",
+  "scripts": {
+    "start": "node mcp-server.js",
+    "test": "node test-mcp.js"
+  },
+  "license": "MIT"
+}
